@@ -9,8 +9,8 @@ from openai import OpenAI
 import mimetypes
 import os
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-REFERENCE_IMAGE_PATH = os.path.join(BASE_DIR, "reference.png")
+#BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+REFERENCE_IMAGE_PATH = os.path.join("static", "reference.png")
 
 load_dotenv()
 
