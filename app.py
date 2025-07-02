@@ -7,6 +7,10 @@ import io
 import fitz  # PyMuPDF
 from openai import OpenAI
 import mimetypes
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+REFERENCE_IMAGE_PATH = os.path.join(BASE_DIR, "reference.png")
 
 load_dotenv()
 
@@ -16,7 +20,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 app = Flask(__name__)
 
 # Load reference chart
-REFERENCE_IMAGE_PATH = "reference.png"  # e.g., strip color chart
+#REFERENCE_IMAGE_PATH = "reference.png"  # e.g., strip color chart
 
 # Diagnosis map
 DIAGNOSIS_GUIDE = """
@@ -162,7 +166,7 @@ def analyze():
         print("❌ Exception during processing:", str(e))
         return jsonify({"error": str(e)}), 500
 
-import os
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
