@@ -10,7 +10,7 @@ import mimetypes
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-REFERENCE_IMAGE_PATH = os.path.join(BASE_DIR,"static", "reference.png")
+REFERENCE_IMAGE_PATH = os.path.join(BASE_DIR,"static", "reference.PNG")
 
 load_dotenv()
 
