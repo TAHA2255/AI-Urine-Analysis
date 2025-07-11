@@ -72,11 +72,17 @@ def convert_pdf_to_image(pdf_bytes):
     except Exception as e:
         print(f"❌ Error converting PDF to image: {e}")
         raise
+
 def ask_gpt4o(user_image_b64, reference_image_b64, diagnosis_guide):
     messages = [
         {
             "role": "system",
-            "content": "You are a medical assistant. The user will provide you a urine test strip image and a reference strip. Compare them, match the test strip to the closest pads on the reference, and return ONE concise sentence diagnosis using this table."
+            "content": (
+                "You are a medical assistant. The user will provide a urine test strip image and a reference strip chart. "
+                "Compare the two, determine which test pads show abnormal results, and respond with a single paragraph summarizing ONLY the abnormalities. "
+                "Format like this: 'Based on the analysis, the following abnormalities were detected: Test 3 indicates Urinary tract infection probability; "
+                "Test 4 indicates Urinary tract infection probability; ...'. Do not mention normal tests. Use the diagnosis guide to map test numbers to medical meanings."
+            )
         },
         {
             "role": "user",
@@ -88,7 +94,7 @@ def ask_gpt4o(user_image_b64, reference_image_b64, diagnosis_guide):
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": f"This is the user's test strip image. Based on it and the reference, respond with only one medical diagnosis using this guide:\n\n{diagnosis_guide}"},
+                {"type": "text", "text": f"This is the user's test strip image. Based on it and the reference, respond with a paragraph summary of abnormalities only. Use this guide:\n\n{diagnosis_guide}"},
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64," + user_image_b64}}
             ]
         }
@@ -96,9 +102,8 @@ def ask_gpt4o(user_image_b64, reference_image_b64, diagnosis_guide):
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=messages,
-        max_tokens=100
+        max_tokens=300
     )
-
 
     return response.choices[0].message.content.strip()
 
@@ -164,6 +169,33 @@ def analyze():
 
     except Exception as e:
         print("❌ Exception during processing:", str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/analyze_direct", methods=["POST"])
+def analyze_direct():
+    if 'file' not in request.files:
+        return jsonify({"error": "No image file provided"}), 400
+
+    file = request.files['file']
+    if not file:
+        return jsonify({"error": "No file received"}), 400
+
+    try:
+        # Open and convert uploaded image to RGB
+        user_image = Image.open(file.stream).convert("RGB")
+
+        # Load the reference image
+        reference_image = Image.open(REFERENCE_IMAGE_PATH)
+        reference_b64 = to_base64(reference_image)
+        user_b64 = to_base64(user_image)
+
+        # Ask GPT-4o for diagnosis
+        result = ask_gpt4o(user_b64, reference_b64, DIAGNOSIS_GUIDE)
+        return jsonify({"result2": result})
+
+    except Exception as e:
+        print("❌ Exception in /analyze_direct:", str(e))
         return jsonify({"error": str(e)}), 500
 
 
