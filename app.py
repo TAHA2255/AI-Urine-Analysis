@@ -73,39 +73,101 @@ def convert_pdf_to_image(pdf_bytes):
         print(f"❌ Error converting PDF to image: {e}")
         raise
 
-def ask_gpt4o(user_image_b64, reference_image_b64, diagnosis_guide):
+# def ask_gpt4o(user_image_b64, reference_image_b64, diagnosis_guide):
+#     messages = [
+#         {
+#             "role": "system",
+#             "content": (
+#                 "You are a medical assistant. The user will provide a urine test strip image and a reference strip chart. "
+#                 "Compare the two, determine which test pads show abnormal results, and respond with a single paragraph summarizing ONLY the abnormalities. "
+#                 "Format like this: 'Based on the analysis, the following abnormalities were detected: Test 3 indicates Urinary tract infection probability; "
+#                 "Test 4 indicates Urinary tract infection probability; ...'. Do not mention normal tests. Use the diagnosis guide to map test numbers to medical meanings."
+#             )
+#         },
+#         {
+#             "role": "user",
+#             "content": [
+#                 {"type": "text", "text": "This is the reference chart image."},
+#                 {"type": "image_url", "image_url": {"url": "data:image/png;base64," + reference_image_b64}}
+#             ]
+#         },
+#         {
+#             "role": "user",
+#             "content": [
+#                 {"type": "text", "text": f"This is the user's test strip image. Based on it and the reference, respond with a paragraph summary of abnormalities only. Use this guide:\n\n{diagnosis_guide}"},
+#                 {"type": "image_url", "image_url": {"url": "data:image/png;base64," + user_image_b64}}
+#             ]
+#         }
+#     ]
+#     response = client.chat.completions.create(
+#         model="gpt-4o",
+#         messages=messages,
+#         max_tokens=300
+#     )
+
+#     return response.choices[0].message.content.strip()
+
+def ask_gpt4o(user_image_b64, reference_image_b64=None, diagnosis_guide=None):
     messages = [
         {
             "role": "system",
             "content": (
-                "You are a medical assistant. The user will provide a urine test strip image and a reference strip chart. "
-                "Compare the two, determine which test pads show abnormal results, and respond with a single paragraph summarizing ONLY the abnormalities. "
-                "Format like this: 'Based on the analysis, the following abnormalities were detected: Test 3 indicates Urinary tract infection probability; "
-                "Test 4 indicates Urinary tract infection probability; ...'. Do not mention normal tests. Use the diagnosis guide to map test numbers to medical meanings."
+                "You are a precise medical assistant. The user will upload either:\n"
+                "1. A urine test strip image along with a reference color chart, OR\n"
+                "2. A PDF or image of a urine lab report.\n\n"
+
+                "→ If it's a **test strip image**:\n"
+                "- Carefully compare the strip against the reference chart.\n"
+                "- Determine which **pads** show an abnormal result.\n"
+                "- Respond ONLY with a paragraph that summarizes abnormalities.\n"
+                "- Format:\n"
+                "'Based on the analysis, the following abnormalities were detected: Pad 3 indicates Urinary tract infection probability; Pad 8 indicates Liver issue probability.'\n"
+                "- Use the **diagnosis guide exactly**.\n"
+                "- If unsure, pick the **closest color**.\n"
+                "- Do **not** include instructions, disclaimers, Test or normal pads.\n\n"
+
+       
+                "If it is a **lab report**:\n"
+                "- Read the full report carefully.\n"
+                "- Identify ONLY values that are outside the normal range.\n"
+                "- For each abnormal value, match it to the most appropriate phrase from the diagnosis guide.\n"
+                "- Use the **exact** phrasing from the diagnosis guide.\n"
+                "- Return results in a short paragraph like this:\n"
+                "'Based on the report, the following abnormalities were detected: Urinary tract infection probability; Initial screening for a kidney disease probability; Dehydration.'\n"
+                "- Do not mention normal findings or test numbers.\n"
+                "- Do not add any interpretation outside the diagnosis guide.\n\n"
+                f"Diagnosis Guide:\n{diagnosis_guide or ''}"
+
+
             )
-        },
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "This is the reference chart image."},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64," + reference_image_b64}}
-            ]
-        },
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": f"This is the user's test strip image. Based on it and the reference, respond with a paragraph summary of abnormalities only. Use this guide:\n\n{diagnosis_guide}"},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64," + user_image_b64}}
-            ]
         }
     ]
+
+    if reference_image_b64:
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "This is the reference strip chart."},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64," + reference_image_b64}}
+            ]
+        })
+
+    messages.append({
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "This is the user's urine test (either a strip or lab report). Please analyze accordingly."},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + user_image_b64}}
+        ]
+    })
+
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=messages,
-        max_tokens=300
+        max_tokens=500
     )
 
     return response.choices[0].message.content.strip()
+
 
 import base64
 
@@ -175,29 +237,42 @@ def analyze():
 @app.route("/analyze_direct", methods=["POST"])
 def analyze_direct():
     if 'file' not in request.files:
-        return jsonify({"error": "No image file provided"}), 400
+        return jsonify({"error": "No file provided"}), 400
 
     file = request.files['file']
     if not file:
         return jsonify({"error": "No file received"}), 400
 
     try:
-        # Open and convert uploaded image to RGB
-        user_image = Image.open(file.stream).convert("RGB")
+        filename = file.filename.lower()
+        file_bytes = file.read()
+        file.stream.seek(0)  # Reset pointer for future reads
 
-        # Load the reference image
-        reference_image = Image.open(REFERENCE_IMAGE_PATH)
-        reference_b64 = to_base64(reference_image)
+        # Determine file type
+        if filename.endswith(".pdf") or file_bytes.startswith(b"%PDF"):
+            # Convert first page of PDF to image
+            user_image = convert_pdf_to_image(file_bytes)
+            is_report = True
+        else:
+            # Open image normally
+            user_image = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+            is_report = False
+
+        # Convert user image to base64
         user_b64 = to_base64(user_image)
 
-        # Ask GPT-4o for diagnosis
-        result = ask_gpt4o(user_b64, reference_b64, DIAGNOSIS_GUIDE)
-        return jsonify({"result2": result})
+        if is_report:
+            result = ask_gpt4o(user_b64)  # no reference or guide for lab reports
+        else:
+            reference_image = Image.open(REFERENCE_IMAGE_PATH)
+            reference_b64 = to_base64(reference_image)
+            result = ask_gpt4o(user_b64, reference_b64, DIAGNOSIS_GUIDE)
+
+        return jsonify({"result": result})
 
     except Exception as e:
         print("❌ Exception in /analyze_direct:", str(e))
         return jsonify({"error": str(e)}), 500
-
 
 
 if __name__ == "__main__":
